@@ -2,38 +2,50 @@
 
 namespace App\Http\Controllers;
 
-use App\DTO\AuthDTO;
-use App\Http\Requests\LoginRequest;
-use App\Http\Requests\RegisterRequest;
-use App\Services\AuthService;
+use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Hash;
+use Tymon\JWTAuth\Facades\JWTAuth;
+use App\Models\User;
 
 class AuthController extends Controller
 {
-    public function __construct(
-        private AuthService $authService
-    ) {}
-
-    public function register(RegisterRequest $request): JsonResponse
+    public function register(Request $request): JsonResponse
     {
-        $authDTO = AuthDTO::fromRequest($request->validated());
-        
-        $result = $this->authService->register($authDTO);
+        $request->validate([
+            'name' => 'required|string|max:255',
+            'email' => 'required|string|email|max:255|unique:users',
+            'password' => 'required|string|min:6|confirmed',
+        ]);
+
+        $user = User::create([
+            'name' => $request->name,
+            'email' => $request->email,
+            'password' => Hash::make($request->password),
+        ]);
+
+        $token = JWTAuth::fromUser($user);
 
         return response()->json([
             'status' => 'success',
             'message' => 'User registered successfully',
-            'data' => $result
+            'data' => [
+                'user' => $user,
+                'token' => $token
+            ]
         ], 201);
     }
 
-    public function login(LoginRequest $request): JsonResponse
+    public function login(Request $request): JsonResponse
     {
-        $credentials = $request->validated();
-        
-        $result = $this->authService->login($credentials);
+        $request->validate([
+            'email' => 'required|string|email',
+            'password' => 'required|string',
+        ]);
 
-        if (!$result) {
+        $credentials = $request->only('email', 'password');
+
+        if (!$token = JWTAuth::attempt($credentials)) {
             return response()->json([
                 'status' => 'error',
                 'message' => 'Invalid credentials'
@@ -43,13 +55,16 @@ class AuthController extends Controller
         return response()->json([
             'status' => 'success',
             'message' => 'Login successful',
-            'data' => $result
+            'data' => [
+                'token' => $token,
+                'user' => auth()->user()
+            ]
         ]);
     }
 
     public function logout(): JsonResponse
     {
-        $this->authService->logout();
+        JWTAuth::invalidate(JWTAuth::getToken());
 
         return response()->json([
             'status' => 'success',
@@ -59,11 +74,9 @@ class AuthController extends Controller
 
     public function me(): JsonResponse
     {
-        $user = $this->authService->getCurrentUser();
-
         return response()->json([
             'status' => 'success',
-            'data' => $user
+            'data' => auth()->user()
         ]);
     }
 }

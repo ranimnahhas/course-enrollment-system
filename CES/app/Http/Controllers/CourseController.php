@@ -2,22 +2,16 @@
 
 namespace App\Http\Controllers;
 
-use App\DTO\EnrollmentDTO;
-use App\Http\Requests\EnrollRequest;
-use App\Services\CourseService;
-use App\Services\EnrollmentService;
+use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use App\Models\Course;
+use App\Models\Enrollment;
 
 class CourseController extends Controller
 {
-    public function __construct(
-        private CourseService $courseService,
-        private EnrollmentService $enrollmentService
-    ) {}
-
     public function index(): JsonResponse
     {
-        $courses = $this->courseService->getAllCourses();
+        $courses = Course::all();
 
         return response()->json([
             'status' => 'success',
@@ -25,34 +19,44 @@ class CourseController extends Controller
         ]);
     }
 
-    public function enroll(EnrollRequest $request): JsonResponse
+    public function enroll(Request $request): JsonResponse
     {
-        try {
-            $enrollmentDTO = EnrollmentDTO::fromRequest(
-                $request->validated(), 
-                auth()->id()
-            );
-            
-            $result = $this->enrollmentService->enrollUser($enrollmentDTO);
+        $request->validate([
+            'course_id' => 'required|exists:courses,id',
+        ]);
 
-            return response()->json([
-                'status' => 'success',
-                'message' => $result['message'],
-                'data' => $result['enrollment']
-            ], 201);
+        $user = auth()->user();
+        $courseId = $request->course_id;
 
-        } catch (\Exception $e) {
+        // Check if already enrolled
+        $existingEnrollment = Enrollment::where('user_id', $user->id)
+            ->where('course_id', $courseId)
+            ->first();
+
+        if ($existingEnrollment) {
             return response()->json([
                 'status' => 'error',
-                'message' => $e->getMessage()
-            ], $e->getCode() ?: 500);
+                'message' => 'You are already enrolled in this course'
+            ], 409);
         }
+
+        $enrollment = Enrollment::create([
+            'user_id' => $user->id,
+            'course_id' => $courseId,
+            'enrolled_at' => now(),
+        ]);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Successfully enrolled in course',
+            'data' => $enrollment
+        ], 201);
     }
 
     public function myCourses(): JsonResponse
     {
-        $userId = auth()->id();
-        $courses = $this->courseService->getUserCourses($userId);
+        $user = auth()->user();
+        $courses = $user->courses()->withPivot('enrolled_at')->get();
 
         return response()->json([
             'status' => 'success',
